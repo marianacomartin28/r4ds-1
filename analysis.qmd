@@ -1,0 +1,110 @@
+---
+title: "Billboard Hot 100"
+author: "Mariana Comartin"
+format: html
+execute:
+  echo: false
+---
+
+```{r}
+#| message: false
+
+library(tidyverse)
+```
+
+```{r}
+#| cache: true
+
+billboard <- read_csv("data/billboard.csv", show_col_types = FALSE)
+
+```
+
+```{r}
+billboard_long <- billboard |>
+  pivot_longer(
+    cols = starts_with("wk"),
+    names_to = "week",
+    names_prefix = "wk",
+    names_transform = list(week = as.integer),
+    values_to = "rank",
+    values_drop_na = TRUE
+  )
+
+billboard_long |>
+  group_by(artist, track) |>
+  filter(week == max(week)) |>
+  filter(week == 20) |>
+  ungroup() |>
+  summarise(
+    songs = n(),
+    ranked_below_50 = sum(rank > 50),
+    .groups = "drop"
+  )
+
+billboard_summary <- billboard_long |>
+  group_by(artist, track) |>
+  summarise(
+    first_rank = rank[which.min(week)],
+    best_rank = min(rank),
+    first_week_at_best = min(week[rank == min(rank)]),
+    total_weeks = n(),
+    .groups = "drop"
+  )
+
+top_10_songs <- billboard_summary |>
+  filter(best_rank <= 10)
+
+notable_songs <- bind_rows(
+  top_10_songs |>
+    filter(best_rank == 1) |>
+    slice_min(first_week_at_best, n = 1, with_ties = FALSE) |>
+    mutate(distinction = "Fastest to number one"),
+  top_10_songs |>
+    filter(best_rank == 1) |>
+    slice_max(first_week_at_best, n = 1, with_ties = FALSE) |>
+    mutate(distinction = "Slowest to number one"),
+  top_10_songs |>
+    slice_max(total_weeks, n = 1, with_ties = FALSE) |>
+    mutate(distinction = "Longest chart run")
+) |>
+  select(distinction, artist, track, first_rank, best_rank, first_week_at_best, total_weeks)
+
+print(notable_songs, width = Inf)
+
+top_10_long <- billboard_long |>
+  inner_join(top_10_songs |> select(artist, track), by = c("artist", "track")) |>
+  left_join(
+    notable_songs |>
+      mutate(song_label = paste(artist, "-", track)) |>
+      select(artist, track, song_label),
+    by = c("artist", "track")
+  )
+
+highlight_labels <- paste(notable_songs$artist, "-", notable_songs$track)
+highlight_colors <- setNames(
+  c("#D55E00", "#0072B2", "#009E73"),
+  highlight_labels
+)
+
+ggplot(
+  top_10_long,
+  aes(x = week, y = rank, group = interaction(artist, track))
+) +
+  geom_line(color = "grey75", alpha = 0.7) +
+  geom_line(
+    data = filter(top_10_long, !is.na(song_label)),
+    aes(color = song_label),
+    linewidth = 1
+  ) +
+  scale_color_manual(
+    name = "Notable songs",
+    values = highlight_colors,
+    breaks = highlight_labels
+  ) +
+  scale_y_reverse() +
+  labs(
+    title = "Top-10 Billboard song rankings over time",
+    x = "Week on chart",
+    y = "Rank"
+  )
+```
